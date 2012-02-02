@@ -1,28 +1,44 @@
-(require "posix")
-(require "xml")
-(require "http")
+;;; -*- Mode: Lisp; Syntax: Common-Lisp -*-
+;;; Zimbra SOAP Client
+;;; Copyright (c) 2010 M. Brent Harp
+
+(eval-when (:compile-toplevel)
+  (load "config"))
+
+(require "posix"  #.(translate-logical-pathname "config:liblisp;posix.fas"))
+(require "xml"    #.(translate-logical-pathname "config:liblisp;xml.fas"))
+(require "http"   #.(translate-logical-pathname "config:liblisp;http.fas"))
 
 (defvar *zimbra-header* "Content-Type: application/soap+xml")
 (defvar *zimbra-protocol* "https")
 (defvar *zimbra-host* "localhost")
 (defvar *zimbra-port* 443)
-(defvar *zimbra-session* "")
-(defvar *zimbra-account* "")
-(defvar *zimbra-password* "")
-(defvar *zimbra-auth-token* "")
+(defvar *zimbra-session* nil)
+(defvar *zimbra-account* nil)
+(defvar *zimbra-password* nil)
+(defvar *zimbra-auth-token* nil)
 (defvar *zimbra-ua-name* "zmlisp")
 (defvar *zimbra-ua-version* "1.0")
 (defvar *zimbra-soap-response* nil)
 (defvar *zimbra-debug* nil)
 (defvar *zimbra-admin-host* "localhost")
 (defvar *zimbra-admin-port* 7071)
-(defvar *zimbra-admin-account* "")
-(defvar *zimbra-admin-password* "")
-(defvar *zimbra-admin-auth-token* "")
+(defvar *zimbra-admin-account* nil)
+(defvar *zimbra-admin-password* nil)
+(defvar *zimbra-admin-auth-token* nil)
+(defvar *zimbra-config* #.(translate-logical-pathname "config:sysconf;zimbra.conf"))
+(defvar *zimbra-auth-cookie* "ZMAUTH")             
 
-;;==================================================================
+;; =================================================================
+;; LOAD DEFAULT CONFIG
+;; =================================================================
+
+(load *zimbra-config*)
+
+
+;; =================================================================
 ;; SOAP
-;;==================================================================
+;; =================================================================
 
 (defun zimbra-soap (url &key (protocol *zimbra-protocol*) (host *zimbra-host*)
                         (port *zimbra-port*) (account *zimbra-account*)
@@ -36,14 +52,14 @@
                header :debug debug
                :body (with-output-to-string 
                        (*standard-output*)
-                       (format t "<soap:Envelope xmlns:soap='http://www.w3.org/2003/05/soap-envelope'>")
+                       (format t "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\">")
                        (format t "<soap:Header>")
-                       (format t "<context xmlns='urn:zimbra'>")
+                       (format t "<context xmlns=\"urn:zimbra\">")
                        (format t "<userAgent name=\"~A\" version=\"~A\"/>" *zimbra-ua-name* *zimbra-ua-version*)
                        (when account (format t "<account>~a</account>" account))
                        (when auth-token (format t "<authToken>~a</authToken>" auth-token))
-                       (when session (format t "<session id='~a'/>" session))
-                       (when session (format t "<sessionId id='~a'/>" session))
+                       (when session (format t "<session id=\"~a\"/>" session))
+                       (when session (format t "<sessionId id=\"~a\"/>" session))
                        (format t "</context>")
                        (format t "</soap:Header>")
                        (format t "<soap:Body>")
@@ -54,6 +70,10 @@
     (setq *zimbra-soap-response* (xml-document))
     (close *standard-input*)
     (when debug (format t "ZIMBRA: DEBUG: SOAP-RESPONSE: ~s~%" *zimbra-soap-response*))
+    (let ((fault (first (xml-get-elements-by-tag-name *zimbra-soap-response* "soap:Fault"))))
+      (when fault (let ((code (xml-first-child (first (xml-get-elements-by-tag-name fault "Code"))))
+                        (text (xml-first-child (first (xml-get-elements-by-tag-name fault "soap:Text")))))
+                    (error "~A: ~A" code text))))
     *zimbra-soap-response*))
 
 (defun zimbra-admin-soap (url &key (host *zimbra-admin-host*) (port *zimbra-admin-port*)
@@ -77,6 +97,12 @@
                        ("account" (("by" . "name")) ,account)
                        ("password" () ,password))))
 
+(defun zimbra-auth-verify-request (token)
+  (zimbra-soap "/service/soap/AuthRequest"
+               :body `("AuthRequest" (("xmlns" . "urn:zimbraAccount"))
+                       ("authToken" () ,token)
+                       ("attrs" () ("attr" (("name" . "uid")))))))
+  
 (defun zimbra-admin-auth-request (name password)
   (zimbra-admin-soap "/service/admin/soap/AuthRequest"
                      :body `("AuthRequest" (("xmlns" . "urn:zimbraAdmin"))
@@ -104,6 +130,15 @@
     (let ((auth-token (first (xml-get-elements-by-tag-name response "authToken"))))
       (setq *zimbra-account* name *zimbra-auth-token* (xml-first-child auth-token)))))
 
+(defun zimbra-get-account-name ()
+  (or *zimbra-account*
+      (let ((response (zimbra-auth-verify-request *zimbra-auth-token*)))
+        (let ((attrs (xml-get-elements-by-tag-name response "attr")))
+          (loop for attr in attrs
+                when (equal (xml-get-attribute attr "name") "uid")
+                return (xml-first-child attr))))))
+          
+
 ;;=================================================================
 ;; Folders
 ;;=================================================================
@@ -126,6 +161,21 @@
                :body `("FolderActionRequest" (("xmlns" . "urn:zimbraMail"))
                        ("action" (("op" . ,op) ("id" . ,id))))))
 
+(defun zimbra-create-folder-request (name &key l fie view color f url sync)
+  (let ((body `("CreateFolderRequest" (("xmlns" . "urn:zimbraMail"))))
+        (folder `("folder" (("name" . ,name)))))
+    (when l (xml-set-attribute folder "l" l))
+    (when fie (xml-set-attribute folder "fie" fie))
+    (when view (xml-set-attribute folder "view" view))
+    (when color (xml-set-attribute folder "color" color))
+    (when f (xml-set-attribute folder "f" f))
+    (when url (xml-set-attribute folder "url" url))
+    (when sync (xml-set-attribute folder "sync" sync))
+    (xml-append-child body folder)
+    (zimbra-soap "/service/soap/CreateFolderRequest"
+                 :body body)))
+          
+              
 (defun zimbra-folders ()
   (let ((gf-response (zimbra-get-folder-request)))
     (let ((fldrs (xml-get-elements-by-tag-name gf-response "folder")))
@@ -167,13 +217,30 @@
    :name (xml-get-attribute element "name")))
 
 (defun zimbra-get-all-domains-request ()
-  (zimbra-soap "/service/admin/soap/GetAllDomainsRequest"
-               :body '("GetAllDomainsRequest" (("xmlns" . "urn:zimbraAdmin")))))
+  (zimbra-admin-soap "/service/admin/soap/GetAllDomainsRequest"
+                     :body '("GetAllDomainsRequest" (("xmlns" . "urn:zimbraAdmin")))))
 
 (defun zimbra-domains ()
   (let ((gad-response (zimbra-get-all-domains-request)))
     (let ((domains (xml-get-elements-by-tag-name gad-response "domain")))
       (mapcar #'zimbra-parse-domain domains))))
+
+(defun zimbra-admin-get-domain-request (name &key (by "name"))
+  (zimbra-admin-soap "/service/admin/soap/GetDomainRequest"
+                     :body `("GetDomainRequest" (("xmlns" . "urn:zimbraAdmin"))
+                             ("domain" (("by" . ,by)) ,name))))
+
+(defun zimbra-admin-copy-domain-aliases (from to)
+  (let* ((query (format nil "(mail=*@~A)" from))
+         (accounts (zimbra-admin-search-directory query :attrs "zimbraMailAlias")))
+    (dolist (account accounts)
+      (dolist (a (xml-get-elements-by-tag-name account "a"))
+        (let* ((alias (xml-first-child a))
+               (pos   (search from alias :from-end t)))
+          (when (and pos (= (+ pos (length from)) (length alias)))
+            (zimbra-admin-add-account-alias-request
+             (xml-get-attribute account "id")
+             (format nil "~A@~A" (subseq alias 0 (1- pos)) to))))))))
 
 
 ;;==========================================================================
@@ -216,49 +283,69 @@
 ;; Accounts
 ;;===========================================================================
 
-(defstruct zimbra-account id name)
+(defstruct zimbra-account id name cn)
 
 (defun zimbra-parse-account (element)
-  (make-zimbra-account
-   :id   (xml-get-attribute element "id")
-   :name (xml-get-attribute element "name")))
+  (let ((account
+         (make-zimbra-account
+          :id   (xml-get-attribute element "id")
+          :name (xml-get-attribute element "name"))))
+    (dolist (a (xml-get-elements-by-tag-name element "a"))
+      (when (equal "cn" (xml-get-attribute a "n"))
+        (setf (zimbra-account-cn account) (xml-first-child a))))
+    account))
 
-(defun zimbra-create-account-request (name password)
-  (zimbra-soap "/service/admin/soap/CreateAccountRequest"
-               :body `("CreateAccountRequest" (("xmlns" . "urn:zimbraAdmin"))
-                       ("name"     () ,name)
-                       ("password" () ,password))))
+(defun zimbra-get-info-request (sections)
+  (zimbra-soap "/service/soap/GetInfoRequest"
+               :body `("GetInfoRequest" (("sections" . ,sections)
+                                         ("xmlns" . "urn:zimbraAccount")))))
+                       
 
-(defun zimbra-create-account (name password)
-  (let ((ca-response (zimbra-create-account-request name password)))
+(defun zimbra-admin-create-account-request (name password)
+  (zimbra-admin-soap "/service/admin/soap/CreateAccountRequest"
+                     :body `("CreateAccountRequest" (("xmlns" . "urn:zimbraAdmin"))
+                             ("name"     () ,name)
+                             ("password" () ,password))))
+
+(defun zimbra-admin-create-account (name password)
+  (let ((ca-response (zimbra-admin-create-account-request name password)))
     (let ((account (first (xml-get-elements-by-tag-name ca-response "account"))))
       (zimbra-parse-account account))))
 
 
-(defun zimbra-modify-account-request (id attributes)
-  (zimbra-soap "/service/admin/soap/ModifyAccountRequest"
-               :body `("ModifyAccountRequest" (("xmlns" . "urn:zimbraAdmin"))
-                       ("id" () ,id)
-                       ,@(mapcar
-                          (lambda (a) `("a" (("n" . ,(car a))) ,(cdr a)))
-                          attributes))))
+(defun zimbra-admin-modify-account-request (id attributes)
+  (zimbra-admin-soap "/service/admin/soap/ModifyAccountRequest"
+                     :body `("ModifyAccountRequest" (("xmlns" . "urn:zimbraAdmin"))
+                             ("id" () ,id)
+                             ,@(mapcar
+                                (lambda (a) `("a" (("n" . ,(car a))) ,(cdr a)))
+                                attributes))))
 
-(defun zimbra-get-account-request (account &key (by "name"))
-  (zimbra-soap "/service/admin/soap/GetAccountRequest"
-               :body `("GetAccountRequest" (("xmlns" . "urn:zimbraAdmin"))
-                       ("account" (("by" . ,by)) ,account))))
+(defun zimbra-admin-get-account-request (account &key (by "name"))
+  (zimbra-admin-soap "/service/admin/soap/GetAccountRequest"
+                     :body `("GetAccountRequest" (("xmlns" . "urn:zimbraAdmin"))
+                             ("account" (("by" . ,by)) ,account))))
 
-(defun zimbra-account (name)
-  (let ((response (zimbra-get-account-request name :by "name")))
+(defun zimbra-admin-get-account (name)
+  (let ((response (zimbra-admin-get-account-request name :by "name")))
     (let ((account (first (xml-get-elements-by-tag-name response "account"))))
       (zimbra-parse-account account))))
 
 (defun zimbra-set-account-cos (account cos-name)
   (let ((account-id (zimbra-account-id account))
         (cos-id (zimbra-cos-id (zimbra-cos cos-name))))
-    (zimbra-modify-account-request account-id `(("zimbraCOSId" . ,cos-id)))))
+    (zimbra-admin-modify-account-request account-id `(("zimbraCOSId" . ,cos-id)))))
 
+(defun zimbra-admin-add-account-alias-request (id alias)
+  (zimbra-admin-soap "/service/admin/soap/AddAccountAliasRequest"
+                     :body `("AddAccountAliasRequest" (("xmlns" . "urn:zimbraAdmin"))
+                             ("id"    () ,id)
+                             ("alias" () ,alias))))
 
+(defun zimbra-admin-get-all-accounts-request (domain &key (by "name"))
+  (zimbra-admin-soap "/service/admin/soap/GetAllAccountsRequest"
+                     :body `("GetAllAccountsRequest" (("xmlns" . "urn:zimbraAdmin"))
+                             ("domain" (("by" . ,by)) ,domain))))
 
 ;;======================================================================
 ;; Directory
@@ -267,7 +354,7 @@
 (defun zimbra-admin-search-directory-request
   (query &key limit offset domain apply-cos max-results attrs sort-by 
          sort-ascending types)
-  (let ((body `("SearchDirectoryRequest" (("xmlns" . "urn:zimbraAdmin"))
+  (let ((body `("SearchDirectoryRequest" (("attrs" . " ") ("xmlns" . "urn:zimbraAdmin"))
                 ("query" () ,query))))
     (when limit (xml-set-attribute body "limit" limit))
     (when offset (xml-set-attribute body "offset" offset))
@@ -291,16 +378,65 @@
                    :sort-ascending sort-ascending :types types)))
     (xml-child-nodes (first (xml-get-elements-by-tag-name response "SearchDirectoryResponse")))))
 
+(defun zimbra-admin-search (query &key attrs)
+  (do ((result (zimbra-admin-search-directory query :attrs attrs :max-results 0 :limit 1000 :offset 0)
+               (zimbra-admin-search-directory query :attrs attrs :max-results 0 :limit 1000 :offset offset))
+       (offset 0 (+ offset 1000)))
+      ((null result))
+      (print (length result))))
+      
+(defun zimbra-admin-search-accounts-uid (query)
+  (let ((accounts (zimbra-admin-search-directory query :attrs "uid")))
+    (mapcar (lambda (account) (xml-first-child (first (xml-get-elements-by-tag-name account "a")))) accounts)))
+
+(defun zimbra-admin-search-accounts (query &key attrs max-results limit offset domain apply-cos 
+                                           sort-by sort-ascending)
+  (mapcar #'zimbra-parse-account (zimbra-admin-search-directory query :attrs attrs :max-results max-results
+                                                                :limit limit :offset offset :domain domain
+                                                                :apply-cos apply-cos :sort-by sort-by
+                                                                :sort-ascending sort-ascending)))
+
+(defun zimbra-admin-print-accounts (query &optional (stream *standard-output*))
+  (map nil (lambda (a) (format stream "~A~%" a)) (zimbra-admin-search-accounts query)))
+
+(defun zimbra-admin-search-coses (query)
+  (mapcar #'zimbra-parse-cos (zimbra-admin-search-directory query :types "coses")))
+
+(defun zimbra-query (form)
+  (cond ((atom form) form)
+        ((eq (car form) :or)
+         (format nil "(|~{~A~})" (mapcar #'zimbra-query (cdr form))))
+        ((eq (car form) :and)
+         (format nil "(&amp;~{~A~})" (mapcar #'zimbra-query (cdr form))))
+        ((eq (car form) :not)
+         (format nil "(!~A)" (zimbra-query (cadr form))))
+        ((eq (car form) :eq)
+         (format nil "(~A=~A)" (zimbra-query (cadr form)) (zimbra-query (caddr form))))
+        ((eq (car form) :member)
+         (cond ((zerop (length (caddr form)))
+                (format nil "(~A=)" (cadr form)))
+               ((= (length (caddr form)) 1)
+                (format nil "(~A=~A)" (cadr form) (caaddr form)))
+               (t ;otherwise
+                (format nil "(|~:{(~A=~A)~})" (mapcar (lambda (value) (list (cadr form) value))
+                                                      (caddr form))))))))
+  
 ;;======================================================================
 ;; Class of Service (COS)
 ;;======================================================================
 
-(defstruct zimbra-cos id name)
+(defstruct zimbra-cos id name available-zimlets)
 
 (defun zimbra-parse-cos (element)
-  (make-zimbra-cos
-   :id   (xml-get-attribute element "id")
-   :name (xml-get-attribute element "name")))
+  (let ((cos (make-zimbra-cos
+              :id (xml-get-attribute element "id")
+              :name (xml-get-attribute element "name"))))
+    (dolist (a (xml-get-elements-by-tag-name element "a"))
+      (let ((n (xml-get-attribute a "n"))
+            (v (xml-first-child a)))
+        (cond ((string= n "zimbraZimletAvailableZimlets")
+               (push v (zimbra-cos-available-zimlets cos))))))
+    cos))
 
 (defun zimbra-get-cos-request (cos &key (by "id"))
   (zimbra-soap "/service/admin/soap/GetCosRequest"
@@ -311,6 +447,47 @@
   (let ((gc-response (zimbra-get-cos-request name :by "name")))
     (let ((cos (first (xml-get-elements-by-tag-name gc-response "cos"))))
       (zimbra-parse-cos cos))))
+
+
+;;======================================================================
+;; Zimlets
+;;======================================================================
+
+(defun zimbra-zimlet-disabled (zimlet-name)
+  (format nil "(zimbraZimletAvailableZimlets=-~A)" zimlet-name))
+
+(defun zimbra-zimlet-enabled (zimlet-name)
+  (format nil "(zimbraZimletAvailableZimlets=+~A)" zimlet-name))
+
+(defun zimbra-zimlet-mandatory (zimlet-name)
+  (format nil "(zimbraZimletAvailableZimlets=!~A)" zimlet-name))
+
+(defun zimbra-admin-query-zimlet-enabled (zimlet-name)
+  (let ((disabled  (mapcar #'zimbra-cos-id (zimbra-admin-search-coses (zimbra-zimlet-disabled zimlet-name))))
+        (enabled   (mapcar #'zimbra-cos-id (zimbra-admin-search-coses (zimbra-zimlet-enabled zimlet-name))))
+        (mandatory (mapcar #'zimbra-cos-id (zimbra-admin-search-coses (zimbra-zimlet-mandatory zimlet-name)))))
+    (zimbra-query `(:or (:and (:member "zimbraCOSId" ,disabled)
+                              (:or (:and (:eq "zimbraPrefZimlets" ,zimlet-name)
+                                         (:not (:eq "zimbraZimletAvailableZimlets" "*")))
+                                   (:eq "zimbraZimletAvailableZimlets" ,(format nil "!~A" zimlet-name))
+                                   (:and (:eq "zimbraZimletAvailableZimlets" ,(format nil "+~A" zimlet-name))
+                                         (:not (:eq "zimbraPrefDisabledZimlets" ,zimlet-name)))))
+                        (:and (:member "zimbraCOSId" ,enabled)
+                              (:or (:and (:not (:eq "zimbraPrefDisabledZimlets" ,zimlet-name))
+                                         (:not (:eq "zimbraZimletAvailableZimlets" "*")))
+                                   (:eq "zimbraZimletAvailableZimlets" ,(format nil "!~A" zimlet-name))
+                                   (:and (:eq "zimbraZimletAvailableZimlets" ,(format nil "-~A" zimlet-name))
+                                         (:eq "zimbraPrefZimlets" ,zimlet-name))))
+                        (:and (:member "zimbraCOSId" ,mandatory)
+                              (:or (:not (:eq "zimbraZimletAvailableZimlets" "*"))
+                                   (:and (:eq "zimbraZimletAvailableZimelts" ,(format nil "+~A" zimlet-name))
+                                         (:not (:eq "zimbraPrefDisabledZimlets" ,zimlet-name)))
+                                   (:and (:eq "zimbraZimletAvailableZimlets" ,(format nil "-~A" zimlet-name))
+                                         (:eq "zimbraPrefZimlets" ,zimlet-name))))))))
+
+(defun zimbra-admin-zimlet-enabled (zimlet-name)
+  (let ((query (zimbra-admin-query-zimlet-enabled zimlet-name)))
+    (zimbra-admin-search-accounts query :max-results 0)))
 
 
 ;;======================================================================
@@ -393,7 +570,7 @@
       (zimbra-mount
        (concatenate 'string (or (zimbra-share-owner-name share)
                                 (zimbra-share-owner-email share)) 
-                    "'s" (zimbra-sanitize-path (zimbra-share-folder-path share)))
+                    (zimbra-sanitize-path (zimbra-share-folder-path share)))
        (zimbra-share-owner-id share)
        (zimbra-share-folder-id share)
        :view (zimbra-share-view share)))))
@@ -408,8 +585,7 @@
   (dolist (dlname (zimbra-distribution-lists (zimbra-domain-name domain)))
     (let ((dl (zimbra-distribution-list (zimbra-distribution-list-name dlname))))
       (dolist (member (zimbra-distribution-list-members dl))
-        (let ((account (zimbra-create-account member "password")))
+        (let ((account (zimbra-admin-create-account member "password")))
           (zimbra-set-account-cos account "student"))))))
-
 
 (provide "zimbra")
