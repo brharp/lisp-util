@@ -1,50 +1,47 @@
-(defun variablep (x)
-  (and (symbolp x) (eq (elt (symbol-name x) 0) #\?)))
 
-(defstruct db-tree
-  (first nil) (rest nil) 
-  (keys (make-hash-table)))
+(defvar *db-pathname-defaults* 
+  "/var/local/db/*")
 
-(defvar *db* (make-db-tree))
+(defvar *db-directory*
+  (merge-pathnames "default" *db-pathname-defaults*))
 
-(defun db-put (key value &optional (db *db*))
-  (cond ((consp key)
-         (db-put (first key) value 
-                 (or (db-tree-first db)
-                     (setf (db-tree-first db) (make-db-tree))))
-         (db-put (rest key) value
-                 (or (db-tree-rest db)
-                     (setf (db-tree-rest db) (make-db-tree)))))
-        ((null key))
-        (t (vector-push-extend
-            value (or (gethash key (db-tree-keys db))
-                      (setf (gethash key (db-tree-keys db))
-                            (make-array 1 :adjustable t
-                                        :fill-pointer 0)))))))
+(defun db-open (name)
+  (setf *db-directory*
+    (merge-pathnames name *db-pathname-defaults*)))
 
-(defun db-get (key &optional (best-n most-positive-fixnum) 
-                   (best-list (make-array 0)) (db *db*))
-  (cond ((or (null key) (variablep key))
-         (values best-list best-n))
-        ((consp key)
-         (multiple-value-bind (list n)
-          (db-get (first key) best-n best-list (db-tree-first db))
-          (db-get (rest key) n list (db-tree-rest db))))
-        (t (let* ((list (gethash key (db-tree-keys db)))
-                  (n (length list)))
-             (if (< n best-n)
-                 (values list n)
-               (values best-list best-n))))))
- 
-(defun match (pattern input bindings)
-  (cond ((eql bindings fail) fail)
-        ((variable-p pattern)
-         (let ((binding (assoc pattern bindings)))
-           (cond ((null binding) (acons pattern input bindings))
-                 ((eql (cdr binding) input) bindings)
-                 (t fail))))
-        ((eql pattern input) bindings)
-        ((and (consp pattern) (consp input))
-         (match (rest pattern) (rest input)
-                (match (first pattern) (first input) bindings)))
-        (t fail)))
+(defun db-hash (key)
+  (mod (sxhash key) 1024))
+
+(defun db-hash-address (key)
+  (merge-pathnames (format nil "~X" (db-hash key)) *db-directory*))
+
+(defun db-put (key value)
+  (let ((path (db-hash-address key)))
+    (with-open-file (stream path :direction :io 
+                            :element-type 'character
+                            :if-does-not-exist :create)
+      (let ((bucket (read stream nil nil)))
+        (file-position stream 0)
+        (prin1 (acons key value (remove key bucket :key #'car
+                                        :test #'equal))
+               stream)))))
+
+(defun db-get (key)
+  (let ((path (db-hash-address key)))
+    (with-open-file (stream path :direction :input :element-type 'character
+                            :if-does-not-exist :create)
+      (let ((bucket (read stream nil nil)))
+        (cdr (find key bucket :key #'car :test #'equal))))))
+
+(defun db-map (function)
+  (dolist (path (directory *db-directory*))
+    (with-open-file (stream path :direction :input :element-type 'character)
+      (let ((bucket (read stream nil nil)))
+        (dolist (record bucket)
+          (funcall function (car record) (cdr record)))))))
+
+
+
+
+
+(provide "db")

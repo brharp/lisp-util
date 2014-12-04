@@ -2,11 +2,52 @@
 ;;; XML Processing
 ;;; Copyright (c) 2010 M. Brent Harp
 
+
+(defpackage :xml
+	(:use :common-lisp)
+	(:export #:xml-template-print))
+
+
+(in-package :xml)
+
+
 (defun match-char (char)
   (let ((inch (read-char)))
-    (unless (char= char inch)
+    (if (char= char inch) char
       (error "char mismatch: expected ~s but got ~s"
              char inch))))
+
+(defvar *xml-readtable* (copy-readtable))
+
+(defun |<?-reader| (stream char)
+  (case (peek-char nil stream nil nil)
+	((#\?) (let ((*standard-input* stream))
+		 (xml-processing-instruction)
+		 (xml-document)))
+	((#\=) (read-char stream) '|<=|)
+	(t     '|<|)))
+
+;(set-macro-character #\< #'|<?-reader| t)
+
+(defun xml-processing-instruction ()
+  "Reads a processing instruction."
+  (match-char #\?)
+  (list* (xml-name)
+	 (xml-attribute-list)
+	 (and (match-char #\?)
+	      (match-char #\>)
+	      ())))
+#+debug
+(with-input-from-string
+ (*standard-input* 
+  "?xml?>")
+ (xml-processing-instruction))
+
+#+debug
+(with-input-from-string
+ (*standard-input* 
+  "<?xml?><foo x=y><bar>plus<baz a='b'/>text</bar><zap/></foo>")
+ (read))
 
 (defun xml-document ()
   "Parses an XML document."
@@ -24,6 +65,7 @@
 (defun xml-name-char-p (char)
   (or (char= #\: char)
       (char= #\_ char)
+      (char= #\- char)
       (alphanumericp char)))
 
 (defun xml-name ()
@@ -112,6 +154,8 @@
  (*standard-input* "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Header><context xmlns=\"urn:zimbra\"><authToken>jeiofjeosfjsejfoe832892</authToken><userAgent name=\"brharp@uoguelph.ca\" version=\"1.0\"/></context></soap:Header><soap:Body><GetMiniCalRequest xmlns=\"urn:zimbraMail\"><s>1319947200000</s><e>1323579600000</e><tz id=\"America/New_York\"/><folder><id>10</id></folder></GetMiniCalRequest></soap:Body></soap:Envelope>")
   (xml-document))
 
+	     
+			      
 
 
 ;; DOM Functions
@@ -143,6 +187,11 @@
   (and (consp node)
        (consp (cdr node))
        (cddr node)))
+
+(defun xml-append-child (node child)
+  (and (xml-element-node-p node)
+       (setf (cddr node)
+             (append (cddr node) (list child)))))
 
 (defun xml-attribute-nodes (node)
   (and (consp node)
@@ -179,9 +228,10 @@
 
 (defun xml-print (node)
   (cond
-    ((xml-element-node-p node) (xml-print-element node))
-    ((xml-attribute-node-p node) (xml-print-attribute node))
-    ((xml-text-node-p node) (xml-print-text node))))
+   ((null node) (xml-print-text ""))
+   ((xml-element-node-p node) (xml-print-element node))
+   ((xml-attribute-node-p node) (xml-print-attribute node))
+   ((xml-text-node-p node) (xml-print-text node))))
 
 (defun xml-print-attribute (a)
   (format t " ~a=\"~a\"" (xml-node-name a) (xml-node-value a)))
@@ -206,4 +256,13 @@
  (*standard-input* "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Header><context xmlns=\"urn:zimbra\"><authToken>jeiofjeosfjsejfoe832892</authToken><userAgent name=\"brharp@uoguelph.ca\" version=\"1.0\"/></context></soap:Header><soap:Body><GetMiniCalRequest xmlns=\"urn:zimbraMail\"><s>1319947200000</s><e>1323579600000</e><tz id=\"America/New_York\"/><folder><id>10</id></folder></GetMiniCalRequest></soap:Body></soap:Envelope>")
     (xml-print (xml-document)))
 
-(provide "xml")
+(defun xml-create-attribute-node (name value)
+  (cons name value))
+
+(defun xml-create-element-node (name attributes children)
+  (list* name attributes children))
+
+
+
+
+
