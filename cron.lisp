@@ -18,11 +18,6 @@
  (*standard-input* "Jan ")
  (word))
  
-(defun cron-tab ()
-  "Parses a cron file."
-  (when (peek-char t nil nil)
-    (cons (cron-line)
-	  (cron-tab))))
 
 (defun cron-line ()
   (list (minutes)
@@ -42,42 +37,72 @@
   (field 0 32))
 
 (defun months ()
-  (field 0 12))
+  (field 0 12 '("Xyz" "Jan" "Feb" "Mar" "Apr" "May" "Jun"
+		"Jul" "Aug" "Sep" "Oct" "Nov" "Dec")))
 
 (defun weekdays ()
-  (field 0 7))
+  (field 0 7 '("Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat")))
 
 (defun action ()
+  (peek-char t)
   (read-line))
 
 (defun num ()
-  (let ((w (word)))
-    (parse-integer w)))
+  (parse-integer (word)))
 
-(defun range-end ()
+(defun name (accept)
+  (position (word) accept :test #'equal))
+
+(defun term (accept)
+  (if (digit-char-p (peek-char t))
+      (num) (name accept)))
+
+(defun range-end (names)
   (match-char #\-)
-  (num))
+  (term names))
 
-(defun range (min max)
-  (let ((lo (num)) hi)
+(defun range (min max names)
+  (let ((lo (term names)) hi)
     (case (peek-char t)
-	  ((#\-) (setq hi (range-end)))
+	  ((#\-) (setq hi (range-end names)))
 	  (t     (setq hi lo)))
     (cons lo hi)))
 
-
-(defun field-list (min max)
+(defun field-list (min max names)
   (match-char #\,)
-  (field min max))
+  (field min max names))
 
-(defun field (min max)
-  (list* (range min max)
+(defun wildcard (min max)
+  (match-char #\*)
+  (list (cons min max)))
+
+(defun range-field (min max names)
+  (list* (range min max names)
 	 (case (peek-char t)
-	       ((#\,) (field-list min max))
+	       ((#\,) (field-list min max names))
 	       (t     ()))))
+
+(defun field (min max &optional names)
+  (case (peek-char t)
+	((#\*) (wildcard min max))
+	(t     (range-field min max names))))
 
 #+debug
 (with-input-from-string
- (*standard-input* "30 6-8 3,4-5,9 3 2 Comment")
+ (*standard-input* "30 6-8 3,4-5,9 Feb,3 Mon,Wed,Fri Comment")
  (cron-line))
 
+(defun cron-tab ()
+  "Parses a cron file."
+  (case (peek-char t nil nil :end)
+	((:end) ())
+	((#\#)  (read-line) (cron-tab))
+	(t      (cons (cron-line) (cron-tab)))))
+
+#+debug
+(with-input-from-string
+ (*standard-input* "30 6-8 3,4-5,9 Feb,3 Mon,Wed,Fri Comment
+# This is a comment line
+   # so is this
+0 7 2 10 * Lane swim")
+ (cron-tab))
