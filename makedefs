@@ -1,0 +1,19 @@
+#!/bin/sh
+
+test -x clisp && HAS_CLISP=1
+test -x ecl && HAS_ECL=1
+
+
+: ${LISPC="clisp -q -c"}
+: ${PREFIX="/usr/local"}
+: ${SYSCONFDIR=${PREFIX}"/etc"}
+: ${PKGDATADIR=${PREFIX}"/share"}
+
+export LISPC PREFIX SYSCONFDIR PKGDATADIR
+
+sed 's/  / /g' <<EOF
+LISPC      = $LISPC
+PREFIX     = $PREFIX
+SYSCONFDIR = $SYSCONFDIR
+PKGDATADIR = $PKGDATADIR
+EOF

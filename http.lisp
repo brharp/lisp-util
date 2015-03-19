@@ -1,4 +1,8 @@
-(require "posix")
+
+(eval-when (:compile-toplevel)
+  (load "config"))
+
+(require "posix" #.(translate-logical-pathname "config:lib;lisp;posix"))
 
 (defvar *http-protocol* "http")
 (defvar *http-host* "localhost")

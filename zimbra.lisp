@@ -5,9 +5,9 @@
 (eval-when (:compile-toplevel)
   (load "config"))
 
-(require "posix"  #.(translate-logical-pathname "config:liblisp;posix.fas"))
-(require "xml"    #.(translate-logical-pathname "config:liblisp;xml.fas"))
-(require "http"   #.(translate-logical-pathname "config:liblisp;http.fas"))
+(require "posix"  #.(translate-logical-pathname "config:lib;lisp;posix.fas"))
+(require "xml"    #.(translate-logical-pathname "config:lib;lisp;xml.fas"))
+(require "http"   #.(translate-logical-pathname "config:lib;lisp;http.fas"))
 
 (defvar *zimbra-header* "Content-Type: application/soap+xml")
 (defvar *zimbra-protocol* "https")
