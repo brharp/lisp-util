@@ -4,8 +4,8 @@
 
 
 (defpackage :xml
-	(:use :common-lisp)
-	(:export #:xml-template-print))
+  (:use :common-lisp)
+  (:export #:xml-template-print))
 
 
 (in-package :xml)
