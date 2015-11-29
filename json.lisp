@@ -1,23 +1,16 @@
+;;; JSON processing
+;;; Copyright (c) 2015 M. Brent Harp
 
-(defpackage :json
-  (:use :common-lisp))
+(in-package :cl-user)
 
-(in-package :json)
+(eval-when (:compile-toplevel)
+  (load "config.lisp"))
 
 (defun match-char (char)
   (let ((inch (read-char)))
     (if (char= char inch) char
       (error "char mismatch: expected ~s but got ~s"
              char inch))))
-
-(defun match-token-of
- (do ((char (read-char) (read-char))
-       (buffer (make-array 256 :fill-pointer 0)))
-      ((not (xml-name-char-p char))
-       (progn (unread-char char)
-              (coerce buffer 'string)))
-      (vector-push char buffer)))
-
 
 (defun json-object ()
   (match-char #\{)
@@ -61,11 +54,17 @@
       (digit-char-p char)))
 
 (defun json-number ()
-  (if (char= #\- (peek-char))
-      (read-char)
+  (do ((char (read-char) (read-char nil nil))
+       (buffer (make-array 64 :fill-pointer 0)))
+      ((or (null char) (not (json-number-char-p char)))
+       (when char (unread-char char))
+       (read-from-string (coerce buffer 'string)))
+      (vector-push char buffer)))
+
 (defun json-value ()
-  (ecase (peek-char t)
+  (case (peek-char t)
     (#\{  (json-object))
     (#\[  (json-array))
     (#\"  (json-string))
     (t    (json-number))))
+
