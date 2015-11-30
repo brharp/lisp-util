@@ -61,6 +61,18 @@
        (read-from-string (coerce buffer 'string)))
       (vector-push char buffer)))
 
+(defun json-array ()
+  (match-char #\[)
+  (cons 'json-array (json-value-array)))
+
+(defun json-value-array ()
+  (case (peek-char t)
+    (#\] (read-char) ())
+    (t   (cons (json-value)
+	       (case (read-char)
+		 (#\, (json-value-array))
+		 (#\] ()))))))
+
 (defun json-value ()
   (case (peek-char t)
     (#\{  (json-object))
