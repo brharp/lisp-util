@@ -19,3 +19,18 @@
    (json-number)
    (condition () t)
    )))
+
+(with-input-from-string
+    (*standard-input* "[ \"foo\", \"bar\", 42 ]")
+  (assert (equal (json-array) (list 'json-array "foo" "bar" 42))))
+
+(with-input-from-string
+    (*standard-input* "[ ]")
+  (assert (equal (json-array) (list 'json-array))))
+
+(with-input-from-string
+    (*standard-input* "[")
+  (assert
+   (handler-case 
+       (and (json-array) nil)
+     (condition () t))))
