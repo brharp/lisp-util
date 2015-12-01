@@ -1,7 +1,13 @@
 ;;; JSON processing
 ;;; Copyright (c) 2015 M. Brent Harp
 
-(in-package :cl-user)
+(in-package #:cl-user)
+
+(defpackage #:json
+  (:use #:common-lisp)
+  (:export #:json-value))
+
+(in-package #:json)
 
 (eval-when (:compile-toplevel)
   (load "config.lisp"))
@@ -80,3 +86,5 @@
     (#\"  (json-string))
     (t    (json-number))))
 
+
+(provide "json")
