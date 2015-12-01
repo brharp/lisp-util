@@ -2,5 +2,6 @@
 *.lib
 Makefile
 config.lisp
+makedefs.out
 *~
 
