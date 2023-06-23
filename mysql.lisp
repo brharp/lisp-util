@@ -6,8 +6,8 @@
  (:compile-toplevel)
  (load "config.lisp"))
 
-(require "xml"   #.(translate-logical-pathname "sys:lib;xml"))
-(require "posix" #.(translate-logical-pathname "sys:lib;posix"))
+(require #:xml   #.(translate-logical-pathname "sys:lib;xml"))
+(require #:posix #.(translate-logical-pathname "sys:lib;posix"))
 
 (defvar *mysql-database*)
 (defvar *mysql-command* "mysql")
@@ -20,3 +20,5 @@
       (setq *mysql-result* (xml-document))
       (close *standard-input*)
       *mysql-result*)))
+
+(provide #:mysql)
