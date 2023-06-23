@@ -8,9 +8,11 @@
 (defvar *cgi-query-alist* nil)
 (defvar *cgi-cookie-string* nil)
 (defvar *cgi-cookie-alist* nil)
+(defvar *cgi-form-data* nil)
 
 (defun cgi-get-query (name)
-  (cgi-url-decode (cdr (assoc name (cgi-get-query-alist) :test #'equal))))
+  (let ((value (cdr (assoc name (cgi-get-query-alist) :test #'equal))))
+    (and value (cgi-url-decode value))))
 
 (defun cgi-get-query-alist ()
   (or *cgi-query-alist*
@@ -40,7 +42,7 @@
   (if (zerop (length string)) ()
     (let ((eq (position #\= string)))
       (if (null eq) (cons string string)
-        (cons (intern (string-upcase (cgi-url-decode (subseq string 0 eq))))
+        (cons (cgi-url-decode (subseq string 0 eq))
               (cgi-url-decode (subseq string (1+ eq))))))))
 
 (defun cgi-url-decode (string &optional start end)
@@ -96,6 +98,20 @@
   (mapcar (lambda (s) (cgi-split-string #\= s))
           (cgi-split-string #\; string)))
 
+(defun cgi-parse-content-length (content-length)
+  (and (stringp content-length)
+       (parse-integer content-length :junk-allowed t)))
+
+(defun cgi-content-length ()
+  (or (cgi-parse-content-length (get-env "CONTENT_LENGTH")) 0))
+
+(defun cgi-get-form-data ()
+  (or *cgi-form-data*
+      (setq *cgi-form-data*
+	    (let ((body (make-string (cgi-content-length))))
+	      (read-sequence body *standard-input*)
+	      (cgi-parse-query-string body)))))
+
 (defun cgi-send-redirect (url)
   (format t "Location: ~A~%~%" url))
 
@@ -116,3 +132,13 @@
 
 (defun cgi-server-protocol ()
   (get-env "SERVER_PROTOCOL"))
+
+(defun cgi-request-method ()
+  (get-env "REQUEST_METHOD"))
+
+(defun cgi-request-scheme ()
+  (get-env "REQUEST_SCHEME"))
+
+(defun cgi-document-root ()
+  (get-env "DOCUMENT_ROOT"))
+
