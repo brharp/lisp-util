@@ -130,3 +130,14 @@
 (setf (gethash "loop" *xml-template-tag-function*)
       (function xml-template-tag-loop))
 
+(defun xml-template-tag-with (node env parent)
+  (let* ((form   (xml-get-attribute node "form"))
+	 (name   (intern (string-upcase form) *xml-template-symbol-package*))
+	 (object (get env name)))
+    (when (not (null object))
+      (let ((apply-templates
+	     #'(lambda (child) (xml-template-eval-node child object parent))))
+	(mapcan apply-templates (xml-child-nodes node))))))
+
+(setf (gethash "with" *xml-template-tag-function*)
+      (function xml-template-tag-with))

@@ -51,6 +51,16 @@
 
 (defun xml-document ()
   "Parses an XML document."
+  (when (peek-char t nil nil)
+    (match-char #\<)
+    (case (peek-char)
+	  ((#\?) (and (xml-processing-instruction)
+		      (peek-char t)
+		      (xml-document-element)))
+	  (t     (xml-element)))))
+
+(defun xml-document-element ()
+  "Parses an XML document element."
   (match-char #\<)
   (xml-element))
 
