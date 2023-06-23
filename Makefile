@@ -8,7 +8,7 @@ PACKAGE_NAME    = lisp-util
 PACKAGE_VERSION = 1.0
 DISTDIR         = $(PACKAGE_NAME)-$(PACKAGE_VERSION)
 OBJECTS         = xml.fas http.fas zimbra.fas posix.fas cgi.fas ical.fas \
-                  xml-template.fas db.fas db2.fas io.fas json.fas
+                  xml-template.fas db.fas db2.fas io.fas json.fas concur.fas
 SOURCES         = db2.lisp
 
 default: compile
@@ -50,5 +50,4 @@ config.lisp:
 
 config.lisp: config.lisp.in
 
-test:
-	$(MAKE) -C t
+

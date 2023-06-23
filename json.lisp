@@ -1,46 +1,42 @@
 ;;; JSON processing
 ;;; Copyright (c) 2015 M. Brent Harp
 
-(in-package #:cl-user)
-
-(defpackage #:json
-  (:use #:common-lisp)
-  (:export #:json-value))
-
-(in-package #:json)
-
-(eval-when (:compile-toplevel)
-  (load "config.lisp"))
-
-(defun match-char (char)
+(defun json-match-char (char)
   (let ((inch (read-char)))
     (if (char= char inch) char
       (error "char mismatch: expected ~s but got ~s"
              char inch))))
 
 (defun json-object ()
-  (match-char #\{)
+  (json-match-char #\{)
   (json-property-list))
 
 (defun json-property-list ()
   (case (peek-char t)
     (#\} (read-char) ())
-    (t   (cons (json-property) (json-property-list)))))
+    (t   (append (json-property)
+		 (json-property-list-rest)))))
+
+(defun json-property-list-rest ()
+  (case (peek-char t)
+    (#\} (read-char) ())
+    (t   (json-match-char #\,)
+	 (json-property-list))))
 
 (defun json-property ()
-  (cons (json-property-key)
+  (list (json-property-key)
         (json-property-value)))
 
 (defun json-property-key ()
-  (json-string))
-  
+  (intern (string-upcase (json-string)) :keyword))
+
 (defvar json-string-delim #\")
 
 (defun json-string ()
-  (match-char json-string-delim)
-  (read-delimited-string json-string-delim))
+  (json-match-char json-string-delim)
+  (json-read-delimited-string json-string-delim))
 
-(defun read-delimited-string (delim)
+(defun json-read-delimited-string (delim)
   (do ((char (read-char) (read-char))
        (buffer (make-array 1024 :fill-pointer 0)))
       ((eq delim char)
@@ -48,7 +44,7 @@
       (vector-push char buffer)))
 
 (defun json-property-value ()
-  (match-char #\:)
+  (json-match-char #\:)
   (json-value))
 
 (defun json-number-char-p (char)
@@ -68,8 +64,8 @@
       (vector-push char buffer)))
 
 (defun json-array ()
-  (match-char #\[)
-  (cons 'json-array (json-value-array)))
+  (json-match-char #\[)
+  (json-value-array))
 
 (defun json-value-array ()
   (case (peek-char t)
@@ -86,5 +82,64 @@
     (#\"  (json-string))
     (t    (json-number))))
 
+#+debug
+(with-input-from-string
+ (*standard-input* "{\"x\": 42, \"y\": 7}")
+ (json-value))
+
+#+debug
+(with-input-from-string
+ (*standard-input* "{\"x\": 42}")
+ (json-value))
+
+#+debug
+(with-input-from-string
+ (*standard-input* "[\"x\", 42, \{\"foo\": \"bar\"\}]")
+ (json-value))
+
+(defun json-object-p (value)
+  (and (consp value) (keywordp (car value))))
+
+(defun json-array-p (value)
+  (and (consp value) (not (keywordp (car value)))))
+
+(defun json-print-property-list (value)
+  (when value
+    (json-print-property-key (car value))
+    (write-char #\:)
+    (write-char #\Space)
+    (json-print (cadr value))
+    (json-print-property-list-rest (cddr value))))
+
+(defun json-print-property-list-rest (value)
+  (when value
+    (write-char #\Space)
+    (json-print-property-list value)))
+
+(defun json-print-property-key (value)
+  (write-char #\")
+  (write-string (symbol-name value))
+  (write-char #\"))
+
+(defun json-print-object (value)
+  (prog1 value
+    (write-char #\{)
+    (json-print-property-list value)
+    (write-char #\})))
+
+(defun json-print-number (value)
+  (write value))
+
+(defun json-print-string (value)
+  (prog1 value
+    (write-char #\")
+    (write-string value)
+    (write-char #\")))
+
+(defun json-print (value)
+  (cond ((json-object-p value) (json-print-object value))
+	((json-array-p value)  (json-print-array value))
+	((stringp value)       (json-print-string value))
+	(t                     (json-print-number value))))
 
 (provide "json")
