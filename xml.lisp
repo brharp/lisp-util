@@ -10,7 +10,6 @@
 
 (in-package :xml)
 
-
 (defun match-char (char)
   (let ((inch (read-char)))
     (if (char= char inch) char
@@ -143,10 +142,10 @@
 
 (defun read-delimited-string (delim)
   (do ((char (read-char) (read-char))
-       (buffer (make-array 1024 :fill-pointer 0)))
+       (buffer (make-array 1024 :fill-pointer 0 :adjustable t)))
       ((eq delim char)
        (coerce buffer 'string))
-      (vector-push char buffer)))
+      (vector-push-extend char buffer)))
 
 #+debug
 (with-input-from-string
@@ -236,6 +235,13 @@
 
 ;; XML Printer
 
+(defvar *xml-void-elements*
+  (list "area" "base" "br" "col" "embed" "hr" "img" "input"
+	"link" "meta" "param" "source" "track" "wbr"))
+
+(defun xml-void-element-p (node)
+  (member (xml-node-name node) *xml-void-elements*))
+
 (defun xml-print (node)
   (cond
    ((null node) (xml-print-text ""))
@@ -256,7 +262,9 @@
              (dolist (c (xml-child-nodes node))
                (xml-print c))
              (format t "</~a>" (xml-node-name node)))
-      (format t "/>")))
+    (if (xml-void-element-p node)
+	(format t ">")
+      (format t "></~a>" (xml-node-name node)))))
 
 (defun xml-print-text (node)
   (princ node))
