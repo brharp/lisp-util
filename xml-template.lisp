@@ -76,7 +76,7 @@
 (defun xml-template-expand-param (env)
   (match-char #\{)
   (let ((name (xml-template-param-name)))
-    (princ (or (getf env name) ""))
+    (princ (xml-entity-encode (or (getf env name) "")))
     (match-char #\})))
 
 (defun xml-template-name-char-p (char)

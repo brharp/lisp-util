@@ -266,6 +266,19 @@
 	(format t ">")
       (format t "></~a>" (xml-node-name node)))))
 
+(defun xml-entity-encode (string &optional start end)
+  (with-output-to-string (output)
+    (do* ((i (or start 0) (1+ i)))
+         ((>= i (or end (length string))))
+         (let ((c (elt string i)))
+           (cond
+	     ((char= c #\<) (format output "&lt;"))
+	     ((char= c #\>) (format output "&gt;"))
+	     ((char= c #\&) (format output "&amp;"))
+	     ((char= c #\") (format output "&quot;"))
+	     ((char= c #\') (format output "&apos;"))
+             (t (write-char c output)))))))
+
 (defun xml-print-text (node)
   (princ node))
 
